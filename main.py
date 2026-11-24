@@ -66,27 +66,35 @@ async def api_get(base_url,path,mode,secret):
             return r.status,data
 
 def extract_services(data):
+    # ReadyWA API schema: {ok:true,data:{count:N,services:[...]}}
     if isinstance(data,dict):
-        for key in ("services","data","results","items"):
-            if isinstance(data.get(key),list):
-                data=data[key]; break
-    if not isinstance(data,list): raise ValueError("لم أتعرف على قائمة الخدمات في رد المزود.")
+        payload=data.get("data",data)
+        if isinstance(payload,dict) and isinstance(payload.get("services"),list):
+            data=payload["services"]
+        elif isinstance(payload,dict):
+            for key in ("services","results","items"):
+                if isinstance(payload.get(key),list):
+                    data=payload[key]; break
+        elif isinstance(payload,list):
+            data=payload
+    if not isinstance(data,list):
+        raise ValueError("رد المزود لا يحتوي data.services؛ تحقق من المفتاح ومسار /services.")
     out=[]
     for item in data:
         if not isinstance(item,dict): continue
-        sid=item.get("service",item.get("id",item.get("service_id")))
+        sid=item.get("service_id",item.get("service",item.get("id")))
         name=item.get("name",item.get("title"))
         if sid is None or not name: continue
-        try: price=float(item.get("rate",item.get("price",item.get("price_per_1000",0))) or 0)
+        try: price=float(item.get("price_usd",item.get("rate",item.get("price",0))) or 0)
         except (TypeError,ValueError): price=0
-        try: minimum=max(1,int(item.get("min",item.get("min_quantity",1)) or 1))
-        except (TypeError,ValueError): minimum=1
-        try: maximum=max(minimum,int(item.get("max",item.get("max_quantity",1000000)) or 1000000))
-        except (TypeError,ValueError): maximum=1000000
-        category=str(item.get("category",item.get("type","عام")))[:80]
-        description=str(item.get("description",""))[:500]
-        out.append((str(sid),str(name)[:180],category,description,price,minimum,maximum))
-    if not out: raise ValueError("وصل رد API لكن لم أجد خدمات بالحقول المعتادة (service/id و name).")
+        section=str(item.get("section",item.get("category", "عام")))[:80]
+        stock=item.get("stock")
+        available=item.get("available",True)
+        description=f"السعر للطلب الواحد: {price:.4f} USD | المخزون: {stock if stock is not None else 'غير محدد'} | متاح: {'نعم' if available else 'لا'}"
+        # The catalog stores one-unit products; actual provider purchase/OTP endpoints are not called here.
+        out.append((str(sid),str(name)[:180],section,description,price,1,1))
+    if not out:
+        raise ValueError("تم استلام الرد، لكن لم أجد خدمات تحتوي service_id و name. تأكد من صلاحية المفتاح.")
     return out
 
 def home_kb():
