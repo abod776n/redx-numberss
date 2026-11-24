@@ -130,7 +130,7 @@ async def main():
         for r in rows:
             lines.append(
                 f"**#{r['id']} — {r['name']}**\n"
-                f"القسم: {r['category']} | السعر لكل 1000: {r['price_per_1000']}\n"
+                f"القسم: {r['category']} | السعر للطلب الواحد: {r['price_per_1000']}\n"
                 f"الكمية: {r['min_quantity']} - {r['max_quantity']}"
             )
             if r["description"]:
@@ -184,7 +184,7 @@ async def main():
             )
             if not service or qty < service["min_quantity"] or qty > service["max_quantity"]:
                 return await m.answer("الكمية خارج الحدود المسموحة لهذه الخدمة. أعد المحاولة.")
-            price = round(float(service["price_per_1000"]) * qty / 1000, 6)
+            price = round(float(service["price_per_1000"]) * qty, 6)
             order_id = await conn.fetchval("""
                 INSERT INTO customer_orders
                 (telegram_user_id,telegram_username,service_id,target_url,quantity,quoted_price)
