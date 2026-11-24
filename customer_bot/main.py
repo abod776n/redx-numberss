@@ -14,6 +14,10 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x}
 pool = None
+YER_PER_USD = Decimal("560")
+
+def yer(usd):
+    return f"{Decimal(usd) * YER_PER_USD:,.2f} ر.ي"
 
 class SupportFlow(StatesGroup):
     message = State()
@@ -96,17 +100,17 @@ async def main():
     @dp.callback_query(F.data == "balance")
     async def balance(q: CallbackQuery):
         value = await ensure_wallet(q.from_user.id)
-        await q.message.answer(f"💰 رصيدك الحالي: {Decimal(value):.4f} USD", reply_markup=home_kb())
+        await q.message.answer(f"💰 رصيدك الحالي: {yer(value)}", reply_markup=home_kb())
         await q.answer()
 
     @dp.callback_query(F.data == "topup")
     async def topup(q: CallbackQuery):
         kb = InlineKeyboardBuilder()
         for stars in (100, 250, 500, 1000):
-            kb.button(text=f"⭐ {stars} نجمة = ${stars/100:.2f}", callback_data=f"starpack:{stars}")
+            kb.button(text=f"⭐ {stars} نجمة = {yer(Decimal(stars) / Decimal(100))}", callback_data=f"starpack:{stars}")
         kb.button(text="⬅️ الرئيسية", callback_data="home")
         kb.adjust(1)
-        await q.message.answer("⭐ شحن الرصيد عبر Telegram Stars\\nسعر التحويل: 100 نجمة = 1 دولار. اختر الباقة:", reply_markup=kb.as_markup())
+        await q.message.answer("⭐ شحن الرصيد عبر Telegram Stars\\nسعر التحويل: 100 نجمة = 560 ريال يمني. اختر الباقة:", reply_markup=kb.as_markup())
         await q.answer()
 
     @dp.callback_query(F.data.startswith("starpack:"))
@@ -117,7 +121,7 @@ async def main():
             return await q.answer("باقة غير صالحة", show_alert=True)
         if stars not in (100, 250, 500, 1000):
             return await q.answer("هذه الباقة غير متاحة", show_alert=True)
-        await bot.send_invoice(chat_id=q.from_user.id, title=f"شحن طلباتي نمبر — {stars} نجمة", description=f"إضافة ${stars/100:.2f} إلى محفظتك", payload=f"wallet_topup:{q.from_user.id}:{stars}", provider_token="", currency="XTR", prices=[LabeledPrice(label=f"{stars} Telegram Stars", amount=stars)])
+        await bot.send_invoice(chat_id=q.from_user.id, title=f"شحن طلباتي نمبر — {stars} نجمة", description=f"إضافة {yer(Decimal(stars) / Decimal(100))} إلى محفظتك", payload=f"wallet_topup:{q.from_user.id}:{stars}", provider_token="", currency="XTR", prices=[LabeledPrice(label=f"{stars} Telegram Stars", amount=stars)])
         await q.answer()
 
     @dp.pre_checkout_query()
@@ -149,7 +153,7 @@ async def main():
                     await conn.execute("INSERT INTO number_transactions(telegram_user_id,amount_usd,kind,note) VALUES($1,$2,'telegram_stars_topup',$3)", uid, credited, f"شحن {stars} نجمة")
                 balance = await conn.fetchval("SELECT balance_usd FROM number_wallets WHERE telegram_user_id=$1", uid)
         if inserted:
-            await m.answer(f"✅ تم استلام {stars} نجمة وإضافة ${credited:.2f} إلى رصيدك.\\nرصيدك الحالي: ${Decimal(balance):.2f}", reply_markup=home_kb())
+            await m.answer(f"✅ تم استلام {stars} نجمة وإضافة {yer(credited)} إلى رصيدك.\\nرصيدك الحالي: {yer(balance)}", reply_markup=home_kb())
         else:
             await m.answer("تم تسجيل عملية الدفع هذه سابقاً ولم يُكرر إضافة الرصيد.")
 
@@ -195,11 +199,11 @@ async def main():
         lines = [heading, ""]
         for r in rows:
             price = Decimal(r["price_per_1000"])
-            lines.append(f"{r['name']}\\nالدولة: {r['category']} | السعر: {price:.4f} USD")
+            lines.append(f"{r['name']}\\nالدولة: {r['category']} | السعر: {yer(price)}")
             if r["description"]:
                 lines.append(str(r["description"])[:160])
             lines.append("")
-            kb.button(text=f"شراء {r['name'][:32]} — {price:.4f}$", callback_data=f"buy:{r['id']}")
+            kb.button(text=f"شراء {r['name'][:32]} — {yer(price)}", callback_data=f"buy:{r['id']}")
         kb.button(text="↩️ رجوع للأقسام", callback_data="numbers")
         kb.adjust(1)
         await q.message.answer("\\n".join(lines), reply_markup=kb.as_markup())
@@ -237,7 +241,7 @@ async def main():
             kb.button(text="⬅️ العودة للأرقام", callback_data="numbers")
             kb.adjust(1)
             await q.message.answer(
-                f"رصيدك غير كافٍ.\nالسعر: {price:.4f} USD\nرصيدك: {Decimal(balance):.4f} USD",
+                f"رصيدك غير كافٍ.\nالسعر: {yer(price)}\nرصيدك: {yer(balance)}",
                 reply_markup=kb.as_markup()
             )
             return await q.answer()
@@ -247,9 +251,9 @@ async def main():
         kb.adjust(1)
         await q.message.answer(
             f"تأكيد الطلب\n\nالرقم/الخدمة: {service['name']}\n"
-            f"الدولة: {service['category']}\nالسعر: {price:.4f} USD\n"
-            f"رصيدك الحالي: {Decimal(balance):.4f} USD\n"
-            f"الرصيد بعد الحجز: {Decimal(balance)-price:.4f} USD\n\n"
+            f"الدولة: {service['category']}\nالسعر: {yer(price)}\n"
+            f"رصيدك الحالي: {yer(balance)}\n"
+            f"الرصيد بعد الحجز: {yer(Decimal(balance)-price)}\n\n"
             "سيتم حجز المبلغ عند إنشاء الطلب، ويُراجع الطلب قبل التسليم.",
             reply_markup=kb.as_markup()
         )
@@ -291,13 +295,13 @@ async def main():
                 """, q.from_user.id, -price, f"حجز طلب رقم #{order_id}")
         await q.message.answer(
             f"✅ تم تسجيل طلبك رقم #{order_id}.\n"
-            f"الرقم المطلوب: {service['name']}\nالسعر المحجوز: {price:.4f} USD\n"
+            f"الرقم المطلوب: {service['name']}\nالسعر المحجوز: {yer(price)}\n"
             "الحالة: قيد مراجعة الإدارة. ستصلك رسالة عند تحديث الحالة.",
             reply_markup=home_kb()
         )
         for aid in ADMIN_IDS:
             try:
-                await bot.send_message(aid, f"طلب رقم جديد #{order_id}\nالعميل: {q.from_user.full_name} ({q.from_user.id})\nالرقم: {service['name']}\nالسعر: {price:.4f} USD")
+                await bot.send_message(aid, f"طلب رقم جديد #{order_id}\nالعميل: {q.from_user.full_name} ({q.from_user.id})\nالرقم: {service['name']}\nالسعر: {yer(price)}")
             except Exception:
                 pass
         await q.answer("تم تسجيل طلبك")
@@ -313,7 +317,7 @@ async def main():
             msg = "لا توجد طلبات أرقام مسجلة لك."
         else:
             msg = "📦 طلباتك\n\n" + "\n\n".join(
-                f"#{r['id']} — {r['service_name']}\nالسعر: {Decimal(r['price_usd']):.4f} USD\nالحالة: {r['status']}"
+                f"#{r['id']} — {r['service_name']}\nالسعر: {yer(r['price_usd'])}\nالحالة: {r['status']}"
                 for r in rows
             )
         await q.message.answer(msg, reply_markup=home_kb())
@@ -357,9 +361,9 @@ async def main():
                 await c.execute("INSERT INTO number_wallets(telegram_user_id) VALUES($1) ON CONFLICT DO NOTHING", uid)
                 await c.execute("UPDATE number_wallets SET balance_usd=balance_usd+$2,updated_at=NOW() WHERE telegram_user_id=$1", uid, amount)
                 await c.execute("INSERT INTO number_transactions(telegram_user_id,amount_usd,kind,note) VALUES($1,$2,'admin_credit',$3)", uid, amount, f"شحن يدوي بواسطة المشرف {m.from_user.id}")
-        await m.answer(f"تم إضافة {amount:.4f} USD إلى رصيد {uid}.")
+        await m.answer(f"تم إضافة {yer(amount)} إلى رصيد {uid}.")
         try:
-            await bot.send_message(uid, f"تم شحن رصيدك بمبلغ {amount:.4f} USD.")
+            await bot.send_message(uid, f"تم شحن رصيدك بمبلغ {yer(amount)}.")
         except Exception:
             pass
 
