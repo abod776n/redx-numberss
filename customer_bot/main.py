@@ -185,11 +185,11 @@ async def main():
         await q.message.edit_text(msg, reply_markup=home_kb(), parse_mode="Markdown")
         await q.answer()
 
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        await dp.start_polling(bot)
     finally:
         if pool:
-            asyncio.run(pool.close())
+            await pool.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
