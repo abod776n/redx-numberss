@@ -29,17 +29,19 @@ def is_admin(uid): return uid in ADMIN_IDS
 
 def safe_base_url(value):
     p=urlparse(value.strip())
-    if p.scheme!="https" or not p.hostname or p.username or p.password:
-        raise ValueError("استخدم رابط HTTPS صحيحاً بدون بيانات دخول داخل الرابط.")
+    if p.scheme not in {"https","http"} or not p.hostname or p.username or p.password:
+        raise ValueError("أرسل رابط HTTPS صحيحاً، أو HTTP للمزوّد 38.60.250.36 فقط.")
     host=p.hostname.lower()
     if host in {"localhost","localhost.localdomain"} or host.endswith(".local"):
         raise ValueError("العنوان المحلي غير مسموح.")
+    if p.scheme=="http" and host!="38.60.250.36":
+        raise ValueError("اتصال HTTP مسموح فقط للمزوّد 38.60.250.36. استخدم HTTPS لبقية المزودين.")
     try:
         ip=ipaddress.ip_address(host)
         if not ip.is_global: raise ValueError("عناوين الشبكات الداخلية غير مسموحة.")
     except ValueError as e:
         if "غير مسموح" in str(e): raise
-        try: infos=socket.getaddrinfo(host,p.port or 443,type=socket.SOCK_STREAM)
+        try: infos=socket.getaddrinfo(host,p.port or (443 if p.scheme=="https" else 80),type=socket.SOCK_STREAM)
         except OSError: raise ValueError("تعذر التحقق من عنوان الموقع.")
         for info in infos:
             if not ipaddress.ip_address(info[4][0]).is_global:
@@ -54,7 +56,7 @@ async def api_get(base_url,path,mode,secret):
     elif mode=="x-api-key": headers["X-API-Key"]=secret
     elif mode.startswith("custom:"): headers[mode.split(":",1)[1]]=secret
     timeout=aiohttp.ClientTimeout(total=20)
-    async with aiohttp.ClientSession(timeout=timeout,connector=aiohttp.TCPConnector(ssl=True)) as s:
+    async with aiohttp.ClientSession(timeout=timeout) as s:
         async with s.get(base_url+path,headers=headers,allow_redirects=False) as r:
             body=await r.text()
             if 300<=r.status<400: raise ValueError("تم إيقاف تحويل API للحماية.")
