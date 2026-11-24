@@ -22,6 +22,9 @@ class OrderFlow(StatesGroup):
     link = State()
     quantity = State()
 
+class SupportFlow(StatesGroup):
+    message = State()
+
 async def init_db():
     global pool
     pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5, command_timeout=20)
@@ -56,9 +59,15 @@ async def init_db():
 
 def home_kb():
     kb = InlineKeyboardBuilder()
-    kb.button(text="🛍️ تصفح الخدمات", callback_data="services")
+    kb.button(text="🛍️ شراء الخدمات", callback_data="services")
     kb.button(text="📦 طلباتي", callback_data="myorders")
-    kb.adjust(1)
+    kb.button(text="💰 رصيدي", callback_data="balance")
+    kb.button(text="👥 رابط دعوة", callback_data="invite")
+    kb.button(text="📜 الشروط", callback_data="terms")
+    kb.button(text="🌐 تغيير اللغة", callback_data="language")
+    kb.button(text="📞 الدعم الفني", callback_data="support")
+    kb.button(text="ℹ️ المزيد", callback_data="more")
+    kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 async def main():
@@ -73,6 +82,38 @@ async def main():
             "تصفح الخدمات المتاحة، أرسل طلبك، وتابع حالة طلباتك من هنا.",
             reply_markup=home_kb(), parse_mode="Markdown"
         )
+
+    @dp.callback_query(F.data == "balance")
+    async def balance(q: CallbackQuery):
+        await q.message.answer("💰 **رصيدك**\nنظام الشحن والمحفظة غير مفعّل حالياً. تواصل مع الدعم لمعرفة طرق الدفع.", parse_mode="Markdown", reply_markup=home_kb())
+        await q.answer()
+
+    @dp.callback_query(F.data == "invite")
+    async def invite(q: CallbackQuery):
+        me = await bot.get_me()
+        link = f"https://t.me/{me.username}?start={q.from_user.id}"
+        await q.message.answer(f"👥 **رابط دعوتك:**\n{link}", parse_mode="Markdown", reply_markup=home_kb())
+        await q.answer()
+
+    @dp.callback_query(F.data == "terms")
+    async def terms(q: CallbackQuery):
+        await q.message.answer("📜 **الشروط والأحكام**\n• يمنع إرسال روابط مخالفة أو طلبات غير قانونية.\n• تتم مراجعة الطلب قبل اعتماده.\n• التكلفة المعروضة تقديرية حتى تأكيد الطلب.", parse_mode="Markdown", reply_markup=home_kb())
+        await q.answer()
+
+    @dp.callback_query(F.data == "language")
+    async def language(q: CallbackQuery):
+        await q.answer("الواجهة العربية متاحة حالياً، وإضافة لغات أخرى لاحقاً.", show_alert=True)
+
+    @dp.callback_query(F.data == "more")
+    async def more(q: CallbackQuery):
+        await q.message.answer("✨ **المزيد**\nاستخدم تصفح الخدمات لمشاهدة الخدمات المتاحة، وطلباتي لمتابعة طلباتك.", parse_mode="Markdown", reply_markup=home_kb())
+        await q.answer()
+
+    @dp.callback_query(F.data == "support")
+    async def support(q: CallbackQuery, state: FSMContext):
+        await state.set_state(SupportFlow.message)
+        await q.message.answer("📞 أرسل رسالتك للدعم الفني، وسيتم تحويلها للإدارة.")
+        await q.answer()
 
     @dp.callback_query(F.data == "services")
     async def services(q: CallbackQuery):
@@ -166,6 +207,19 @@ async def main():
                 )
             except Exception:
                 pass
+
+    @dp.message(SupportFlow.message)
+    async def support_message(m: Message, state: FSMContext):
+        body = (m.text or "").strip()
+        if not body:
+            return await m.answer("أرسل رسالة نصية من فضلك.")
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, f"📩 رسالة دعم من {m.from_user.full_name} ({m.from_user.id}):\n{body[:3000]}")
+            except Exception:
+                pass
+        await state.clear()
+        await m.answer("✅ تم إرسال رسالتك إلى الإدارة.", reply_markup=home_kb())
 
     @dp.callback_query(F.data == "myorders")
     async def myorders(q: CallbackQuery):
