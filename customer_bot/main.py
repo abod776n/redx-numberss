@@ -7,7 +7,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, LabeledPrice, PreCheckoutQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
@@ -46,6 +46,14 @@ async def init_db():
             amount_usd NUMERIC(18,6) NOT NULL,
             kind TEXT NOT NULL,
             note TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""")
+        await c.execute("""
+        CREATE TABLE IF NOT EXISTS telegram_star_payments(
+            telegram_payment_charge_id TEXT PRIMARY KEY,
+            telegram_user_id BIGINT NOT NULL,
+            stars INTEGER NOT NULL,
+            credited_usd NUMERIC(18,6) NOT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""")
         await c.execute("""
@@ -93,8 +101,57 @@ async def main():
 
     @dp.callback_query(F.data == "topup")
     async def topup(q: CallbackQuery):
-        await q.message.answer("لشحن رصيدك، أرسل للدعم المبلغ وطريقة الدفع وإثبات التحويل. لن يُضاف الرصيد إلا بعد التحقق.", reply_markup=home_kb())
+        kb = InlineKeyboardBuilder()
+        for stars in (100, 250, 500, 1000):
+            kb.button(text=f"⭐ {stars} نجمة = ${stars/100:.2f}", callback_data=f"starpack:{stars}")
+        kb.button(text="⬅️ الرئيسية", callback_data="home")
+        kb.adjust(1)
+        await q.message.answer("⭐ شحن الرصيد عبر Telegram Stars\\nسعر التحويل: 100 نجمة = 1 دولار. اختر الباقة:", reply_markup=kb.as_markup())
         await q.answer()
+
+    @dp.callback_query(F.data.startswith("starpack:"))
+    async def starpack(q: CallbackQuery):
+        try:
+            stars = int(q.data.split(":", 1)[1])
+        except ValueError:
+            return await q.answer("باقة غير صالحة", show_alert=True)
+        if stars not in (100, 250, 500, 1000):
+            return await q.answer("هذه الباقة غير متاحة", show_alert=True)
+        await bot.send_invoice(chat_id=q.from_user.id, title=f"شحن طلباتي نمبر — {stars} نجمة", description=f"إضافة ${stars/100:.2f} إلى محفظتك", payload=f"wallet_topup:{q.from_user.id}:{stars}", provider_token="", currency="XTR", prices=[LabeledPrice(label=f"{stars} Telegram Stars", amount=stars)])
+        await q.answer()
+
+    @dp.pre_checkout_query()
+    async def pre_checkout(pre: PreCheckoutQuery):
+        try:
+            prefix, uid, stars = pre.invoice_payload.split(":")
+            valid = prefix == "wallet_topup" and int(uid) == pre.from_user.id and int(stars) == pre.total_amount and pre.currency == "XTR" and int(stars) in (100, 250, 500, 1000)
+        except (ValueError, AttributeError):
+            valid = False
+        await pre.answer(ok=valid, error_message=None if valid else "بيانات الفاتورة غير صحيحة. أعد طلب الشحن.")
+
+    @dp.message(F.successful_payment)
+    async def successful_star_payment(m: Message):
+        payment = m.successful_payment
+        try:
+            prefix, uid, stars = payment.invoice_payload.split(":")
+            uid, stars = int(uid), int(stars)
+        except (ValueError, AttributeError):
+            return await m.answer("تعذر التحقق من بيانات الدفع. تواصل مع الدعم.")
+        if prefix != "wallet_topup" or uid != m.from_user.id or payment.currency != "XTR" or payment.total_amount != stars or stars not in (100, 250, 500, 1000):
+            return await m.answer("بيانات الدفع غير مطابقة. تواصل مع الدعم.")
+        credited = Decimal(stars) / Decimal(100)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                inserted = await conn.fetchval("""INSERT INTO telegram_star_payments(telegram_payment_charge_id,telegram_user_id,stars,credited_usd) VALUES($1,$2,$3,$4) ON CONFLICT(telegram_payment_charge_id) DO NOTHING RETURNING telegram_payment_charge_id""", payment.telegram_payment_charge_id, uid, stars, credited)
+                if inserted:
+                    await conn.execute("INSERT INTO number_wallets(telegram_user_id) VALUES($1) ON CONFLICT DO NOTHING", uid)
+                    await conn.execute("UPDATE number_wallets SET balance_usd=balance_usd+$2,updated_at=NOW() WHERE telegram_user_id=$1", uid, credited)
+                    await conn.execute("INSERT INTO number_transactions(telegram_user_id,amount_usd,kind,note) VALUES($1,$2,'telegram_stars_topup',$3)", uid, credited, f"شحن {stars} نجمة")
+                balance = await conn.fetchval("SELECT balance_usd FROM number_wallets WHERE telegram_user_id=$1", uid)
+        if inserted:
+            await m.answer(f"✅ تم استلام {stars} نجمة وإضافة ${credited:.2f} إلى رصيدك.\\nرصيدك الحالي: ${Decimal(balance):.2f}", reply_markup=home_kb())
+        else:
+            await m.answer("تم تسجيل عملية الدفع هذه سابقاً ولم يُكرر إضافة الرصيد.")
 
     @dp.callback_query(F.data == "instructions")
     async def instructions(q: CallbackQuery):
