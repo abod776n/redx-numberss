@@ -87,11 +87,12 @@ def extract_services(data):
         if sid is None or not name: continue
         try: price=float(item.get("price_usd",item.get("rate",item.get("price",0))) or 0)
         except (TypeError,ValueError): price=0
-        section=str(item.get("section",item.get("category", "عام")))[:80]
+        section=str(item.get("section") or item.get("category") or item.get("platform") or item.get("app") or item.get("product_type") or item.get("service_type") or "عام")[:80]
         stock=item.get("stock")
         available=item.get("available",True)
-        description=f"السعر للطلب الواحد: {price:.4f} USD | المخزون: {stock if stock is not None else 'غير محدد'} | متاح: {'نعم' if available else 'لا'}"
-        # The catalog stores one-unit products; actual provider purchase/OTP endpoints are not called here.
+        tags=" ".join(str(item.get(k,"")) for k in ("platform","app","product_type","service_type","type","country","country_name","description") if item.get(k) is not None)
+        description=f"السعر للطلب الواحد: {price:.4f} USD | المخزون: {stock if stock is not None else 'غير محدد'} | متاح: {'نعم' if available else 'لا'} | بيانات التصنيف: {tags[:350]}"
+        # Each imported row is one number/service; provider purchase and OTP endpoints are not called here.
         out.append((str(sid),str(name)[:180],section,description,price,1,1))
     if not out:
         raise ValueError("تم استلام الرد، لكن لم أجد خدمات تحتوي service_id و name. تأكد من صلاحية المفتاح.")
