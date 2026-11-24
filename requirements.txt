@@ -1,3 +1,4 @@
 aiogram>=3.7,<4
 aiohttp>=3.10,<4
 cryptography>=43,<46
+asyncpg>=0.29,<1
