@@ -171,51 +171,27 @@ async def main():
 
     @dp.callback_query(F.data == "numbers")
     async def numbers(q: CallbackQuery):
-        kb = InlineKeyboardBuilder()
-        kb.button(text="🟢 أرقام واتساب", callback_data="category:whatsapp")
-        kb.button(text="🔵 أرقام تليجرام", callback_data="category:telegram")
-        kb.button(text="⬅️ الرئيسية", callback_data="home")
-        kb.adjust(1)
-        await q.message.answer("📱 اختر نوع الأرقام:", reply_markup=kb.as_markup())
-        await q.answer()
-
-    async def show_number_category(q: CallbackQuery, platform: str):
-        if platform == "whatsapp":
-            condition = "(name ILIKE '%whatsapp%' OR name ILIKE '%واتساب%' OR category ILIKE '%whatsapp%' OR category ILIKE '%واتساب%' OR description ILIKE '%whatsapp%' OR description ILIKE '%واتساب%')"
-            heading = "🟢 أرقام واتساب"
-        else:
-            condition = "(name ILIKE '%telegram%' OR name ILIKE '%تليجرام%' OR name ILIKE '%تلجرام%' OR category ILIKE '%telegram%' OR category ILIKE '%تليجرام%' OR category ILIKE '%تلجرام%' OR description ILIKE '%telegram%' OR description ILIKE '%تليجرام%' OR description ILIKE '%تلجرام%')"
-            heading = "🔵 أرقام تليجرام"
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT id,name,category,description,price_per_1000 FROM provider_services WHERE active=TRUE AND " + condition + " ORDER BY category,name,id LIMIT 60"
+                "SELECT id,name,category,description,price_per_1000 FROM provider_services WHERE active=TRUE ORDER BY category,name,id"
             )
         if not rows:
             kb = InlineKeyboardBuilder()
-            kb.button(text="↩️ رجوع للأقسام", callback_data="numbers")
-            await q.message.answer(f"لا توجد {heading} متاحة حالياً.", reply_markup=kb.as_markup())
-            return
+            kb.button(text="⬅️ الرئيسية", callback_data="home")
+            await q.message.answer("لا توجد أرقام مستوردة حالياً. يرجى إعادة استيراد الخدمات من لوحة الإدارة.", reply_markup=kb.as_markup())
+            return await q.answer()
         kb = InlineKeyboardBuilder()
-        lines = [heading, ""]
+        lines = [f"📱 جميع الأرقام المتاحة ({len(rows)} خدمة)", ""]
         for r in rows:
             price = Decimal(r["price_per_1000"])
-            lines.append(f"{r['name']}\\nالدولة: {r['category']} | السعر: {yer(price)}")
+            lines.append(f"{r['name']}\\nالدولة/القسم: {r['category']} | السعر: {yer(price)}")
             if r["description"]:
                 lines.append(str(r["description"])[:160])
             lines.append("")
-            kb.button(text=f"شراء {r['name'][:32]} — {yer(price)}", callback_data=f"buy:{r['id']}")
-        kb.button(text="↩️ رجوع للأقسام", callback_data="numbers")
+            kb.button(text=f"شراء {r['name'][:28]} — {yer(price)}", callback_data=f"buy:{r['id']}")
+        kb.button(text="⬅️ الرئيسية", callback_data="home")
         kb.adjust(1)
         await q.message.answer("\\n".join(lines), reply_markup=kb.as_markup())
-
-    @dp.callback_query(F.data == "category:whatsapp")
-    async def whatsapp_numbers(q: CallbackQuery):
-        await show_number_category(q, "whatsapp")
-        await q.answer()
-
-    @dp.callback_query(F.data == "category:telegram")
-    async def telegram_numbers(q: CallbackQuery):
-        await show_number_category(q, "telegram")
         await q.answer()
 
     @dp.callback_query(F.data.startswith("buy:"))
